@@ -1,31 +1,35 @@
-FROM node:10-slim
+# Use the latest stable Node.js image (Debian Bookworm)
+FROM node:20-slim
 
-# add curl for healthcheck
+# Install system dependencies: curl (for healthchecks) and tini (for proper signal handling)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-    curl \
+    && apt-get install -y --no-install-recommends curl tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Add Tini for proper init of signals
-ENV TINI_VERSION v0.19.0
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
-RUN chmod +x /tini
-
+# Set working directory
 WORKDIR /app
 
-# have nodemon available for local dev use (file watching)
-RUN npm install -g nodemon
-
+# Copy only package files first (to leverage Docker layer caching)
 COPY package*.json ./
 
-RUN npm ci \
- && npm cache clean --force \
- && mv /app/node_modules /node_modules
+# Install dependencies (cleanly and safely)
+RUN npm ci --omit=dev \
+    && npm cache clean --force
 
+# Copy the rest of the app
 COPY . .
 
-ENV PORT 80
+# Optional: install nodemon globally for local development
+RUN npm install -g nodemon
 
+# Set environment variable for the app port
+ENV PORT=80
+
+# Expose the port (so Docker knows which port to open)
 EXPOSE 80
 
-CMD ["/tini", "--", "node", "server.js"]
+# Use tini as the init system (handles zombie processes & signals)
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Start the Node.js server
+CMD ["node", "server.js"]
